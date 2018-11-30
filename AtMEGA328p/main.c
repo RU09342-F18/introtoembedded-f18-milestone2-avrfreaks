@@ -10,7 +10,7 @@
 void USART_Init( unsigned int ubrr){
 	UBRR0H = (unsigned char)(ubrr>>8);
 	UBRR0L = (unsigned char)ubrr;//setup usart bits
-	UCSR0B = (1<<RXEN0)|(1<<TXEN0);//tx rx en
+	UCSR0B = (1<<RXEN0)|(1<<TXEN0)|(1<<RXCIE0);//tx rx en
 }
 void Timer_Init(void){
 	TCCR0A = (1<<COM0A1)|(1<<WGM01)|(1<<WGM00);//fast pwm
@@ -28,7 +28,7 @@ void ADC_init(void){
 	ADCSRA = (1<<ADEN)|(1<<ADPS1)|(1<<ADPS0)|(1<<ADATE);//125 KHz, |(1<<ADIE)
 	ADCSRB = (1<<ADTS2)|(1<<ADTS1);
 }
-const uint8_t REF = 30;//pretty good: 20 1 4
+uint8_t REF = 30;//pretty good: 20 1 4
 const uint8_t 	kp 	= 128,
 				ki 	= 1,
 				kd 	= 40;
@@ -58,10 +58,6 @@ uint8_t ADCtoPWM(int8_t temp, int8_t error[2]){
 	d =  kd * (error[1]-error[0]);
 	if(p+i == 0)
 		d=0;
-	sendint(p);
-	
-	sendint(i);
-	sendint(d);
 	total = p+i+d;
 	if(total >= 255)
 		return 255;
@@ -101,8 +97,31 @@ void sendint(uint8_t temp){
 	USART_Transmit(tempbytes[2]+48);
 	USART_Transmit(tempbytes[1]+48);
 	USART_Transmit(tempbytes[0]+48);
-	USART_Transmit(9);//tab
 
+}
+uint8_t rec[] = {0,0,0,0};
+uint8_t ctr=0;
+ISR(USART_RX_vect){
+	uint8_t temp = UDR0;
+	rec[ctr] = temp;
+	if(ctr < 4)
+		ctr++;
+	if(temp == '\r'){
+		if(ctr == 3)
+			REF = 10*(rec[0]-112)+(rec[1]-112);
+		rec[0]=0;
+		rec[1]=0;
+		rec[2]=0;
+		ctr = 0;
+	}	
+	else if(temp == '\b'){
+		rec[0]=0;
+		rec[1]=0;
+		rec[2]=0;
+		ctr = 0;
+	}
+	
+	
 }
 int main(void){
 
@@ -125,7 +144,14 @@ int main(void){
 		temp = ADCtoTEMP(ADCval);
 		error[0] = temp - REF;
 		OCR0A = ADCtoPWM(temp,error);
+		
+		USART_Transmit('T');
+		USART_Transmit(':');
 		sendint(temp);
+		USART_Transmit(0x09);
+		USART_Transmit('R');
+		USART_Transmit(':');
+		sendint(REF);
 		error[1] = error[0];
 		//sendint(OCR0A);//pwm value
 		USART_Transmit('\r');
